@@ -1,0 +1,235 @@
+DATA GTA_SAS.TRD_Mnth (Label="月个股回报率文件");
+Infile 'D:\GTA_SAS\TRD_Mnth.txt' encoding="utf-8" delimiter = '09'x Missover Dsd lrecl=32767 firstobs=2;
+Format Stkcd $6.;
+Format Trdmnt $7.;
+Format Msmvosd 16.;
+Format Msmvttl 16.;
+Informat Stkcd $6.;
+Informat Trdmnt $7.;
+Informat Msmvosd 16.;
+Informat Msmvttl 16.;
+Label Stkcd="证券代码";
+Label Trdmnt="交易月份";
+Label Msmvosd="月个股流通市值";
+Label Msmvttl="月个股总市值";
+Input Stkcd $ Trdmnt $ Msmvosd Msmvttl ;
+Run;
+data marketvaluePre;
+set GTA_SAS.TRD_Mnth;
+  T=input(substr(left(stkcd),1,1),1.);
+  if T=9 or T=2 then delete;
+  drop T;
+run;
+data marketvalue;
+ set marketvaluePre;
+ year=input(substr(left(Trdmnt),1,4),4.);
+ month=input(substr(left(Trdmnt),6,2),2.);
+ m=(year-2002)*12+month;
+ drop year month Trdmnt;
+run;
+proc sort data=marketvalue;
+by m stkcd;
+run;
+
+DATA GTA_SAS.FS_Combas (Label="资产负债表");/*股东权益*/
+Infile 'D:\GTA_SAS\FS_Combas.txt' encoding="utf-8" delimiter = '09'x Missover Dsd lrecl=32767 firstobs=2;
+Format Stkcd $6.;
+Format Accper $10.;
+Format Typrep $1.;
+Format A003000000 20.;
+Informat Stkcd $6.;
+Informat Accper $10.;
+Informat Typrep $1.;
+Informat A003000000 20.;
+Label Stkcd="证券代码";
+Label Accper="会计期间";
+Label Typrep="报表类型";
+Label A003000000="所有者权益合计";
+Input Stkcd $ Accper $ Typrep $ A003000000 ;
+Run;
+data equity;
+set GTA_SAS.FS_Combas;
+  if Typrep='A';
+  T=input(substr(left(stkcd),1,1),1.);
+  if T=9 or T=2 then delete;
+  year=input(substr(left(Accper),1,4),4.);
+  month=input(substr(left(Accper),6,2),2.);
+  if month=1 then delete;
+  m=(year-2002)*12+month;
+  drop T year month Accper Typrep;
+run;
+proc sort data=equity;
+by m stkcd;
+run;
+data bmratio;
+merge marketvalue equity;
+by m stkcd;
+ bmratio = A003000000 /(Msmvttl*1000);/*总市值单位是千元，换算*/
+ if missing(bmratio) then delete;
+drop A003000000 Msmvosd Msmvttl;
+run;
+
+data marketvalue2;/*计算结果用的marketvalue*/
+ set marketvalue;
+ m=m+1;/*加一是因为前一个月用来预测后一个月*/
+run;
+data bmratio2;/*计算结果用的bmratio*/
+ set bmratio;
+ m=m+1;output;/*账面市值比是季度数据，因此用来预测接下来三个月的*/
+ m=m+1;output;
+ m=m+1;output;
+run;
+proc sort data=bmratio2;
+by m stkcd;
+run;
+
+DATA GTA_SAS.TRD_Mnth1 (Label="月个股回报率文件-回报率");
+Infile 'D:\GTA_SAS\TRD_Mnth1.txt' encoding="utf-8" delimiter = '09'x Missover Dsd lrecl=32767 firstobs=2;
+Format Stkcd $6.;
+Format Trdmnt $7.;
+Format Mretwd 10.8;
+Informat Stkcd $6.;
+Informat Trdmnt $7.;
+Informat Mretwd 10.;
+Label Stkcd="证券代码";
+Label Trdmnt="交易月份";
+Label Mretwd="考虑现金红利再投资的月个股回报率";
+Input Stkcd $ Trdmnt $ Mretwd ;
+Run;
+DATA GTA_SAS.TRD_Mnth2 (Label="月个股回报率文件");
+Infile 'D:\GTA_SAS\TRD_Mnth2.txt' encoding="utf-8" delimiter = '09'x Missover Dsd lrecl=32767 firstobs=2;
+Format Stkcd $6.;
+Format Trdmnt $7.;
+Format Mretwd 10.8;
+Informat Stkcd $6.;
+Informat Trdmnt $7.;
+Informat Mretwd 10.;
+Label Stkcd="证券代码";
+Label Trdmnt="交易月份";
+Label Mretwd="考虑现金红利再投资的月个股回报率";
+Input Stkcd $ Trdmnt $ Mretwd ;
+Run;
+data returnPre;
+ set GTA_SAS.TRD_Mnth1 GTA_SAS.TRD_Mnth2;
+run;
+proc sort data=returnPre;
+by stkcd Trdmnt;
+run;
+data return;
+set returnPre;
+  T=input(substr(left(stkcd),1,1),1.);
+  if T=9 or T=2 then delete;
+  year=input(substr(left(Trdmnt),1,4),4.);
+  month=input(substr(left(Trdmnt),6,2),2.);
+  m=(year-2002)*12+month;
+  drop T year month Trdmnt;
+run;
+proc sort data=return;
+by m stkcd;
+run;
+
+data tablePre;/*用于结果表格*/
+merge ivol marketvalue2 bmratio2 return;
+by m stkcd;
+run;
+
+
+/*☆☆☆☆☆☆☆☆☆☆BEGIN-----去除ST-----按月份*/
+data D_ST2;
+  set typeByMonth;
+  Avail=1;
+run;
+proc sort data=tablePre;
+by stkcd m;
+run;
+data tablePre;
+ merge tablePre D_ST2;
+ by stkcd m;
+ if missing(Avail) then delete;
+ drop Avail;
+run;
+/*☆☆☆☆☆☆☆☆☆☆END-----去除ST-----按月份*/
+
+/*☆☆☆☆☆☆☆☆☆☆BEGIN-----去除金融类-----按月份*/
+data D_Finance2;
+  set GTA_SAS.TRD_Co;
+  if substr(Nnindcd,1,1)='J' then NotAvail=1;
+run;
+proc sort data=tablePre;
+by stkcd m;
+run;
+data tablePre;
+ merge tablePre D_Finance2;
+ by stkcd;
+run;
+data tablePre;
+ set tablePre;
+ if missing(NotAvail)=0 then delete;
+ drop NotAvail Nnindcd;
+run;
+/*☆☆☆☆☆☆☆☆☆☆END-----去除金融类-----按月份*/
+
+data table;
+set tablePre;
+  if missing(IVOL) then delete;
+  if missing(Msmvosd) then delete;
+  if missing(bmratio) then delete;
+  if missing(Mretwd) then delete;
+run;
+proc sort data=table;
+ by m stkcd;
+run;
+
+
+DATA fivefactor_monthly (Label="五因子月度数据");
+Infile 'D:\GTA_SAS\fivefactor_monthly.txt' encoding="utf-8" 
+delimiter = '09'x Missover Dsd lrecl=32767 firstobs=2;
+Format trdmn $7.;
+Format mkt_rf best12.;
+Format smb best12.;
+Format hml best12.;
+Format umd best12.;
+Format rmw best12.;
+Format cma best12.;
+Format rf best12.;
+Format smb_equal best12.;
+Format hml_equal best12.;
+Format umd_equal best12.;
+Format rmw_equal best12.;
+Format cma_equal best12.;
+Informat trdmn $7.;
+Informat mkt_rf best12.;
+Informat smb best12.;
+Informat hml best12.;
+Informat umd best12.;
+Informat rmw best12.;
+Informat cma best12.;
+Informat rf best12.;
+Informat smb_equal best12.;
+Informat hml_equal best12.;
+Informat umd_equal best12.;
+Informat rmw_equal best12.;
+Informat cma_equal best12.;
+Label trdmn="交易日期";
+Label mkt_rf="市场风险因子";
+Label smb="规模风险因子";
+Label hml="账面市值比风险因子";
+Label umd="惯性因子";
+Label rmw="盈利能力因子";
+Label cma="投资模式因子";
+Label rf="无风险利率";
+Label smb_equal="（流通市值加权）规模风险因子";
+Label hml_equal="（流通市值加权）账面市值比风险因子";
+Label umd_equal="（流通市值加权）惯性因子";
+Label rmw_equal="（流通市值加权）盈利能力因子";
+Label cma_equal="（流通市值加权）投资模式因子";
+Input trdmn $ mkt_rf smb  hml umd rmw cma rf smb_equal hml_equal umd_equal rmw_equal cma_equal;
+Run;
+data factors;
+set fivefactor_monthly;
+  year=input(substr(left(trdmn),1,4),4.);
+  month=input(substr(left(trdmn),6,2),2.);
+  m=(year-2002)*12+month;
+  if m<=0 then delete;
+  drop year month trdmn;
+run;
